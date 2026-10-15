@@ -5,7 +5,8 @@ description: Convert raster images (PNG/JPG/JPEG) to SVG on macOS using ImageMag
 
 # convert-to-svg
 
-Pipeline: **ImageMagick** prepares the raster (optional background removal, resize/pad to a canvas) → **vtracer** traces it to SVG.
+Pipeline: **vtracer** traces the image at its NATIVE resolution (ImageMagick is only used for optional `--remove-bg`), then the requested canvas is applied to the SVG itself (`viewBox` + one `<g transform>`).
+**Never resample the raster before tracing** (no `magick -resize`/Lanczos): it rings and blurs the alpha edge, and vtracer then draws a ragged halo around the outline. Measured on a 256px transparent tiger: tracing the original gave a clean outline, the same trace after a Lanczos upscale gave a fringe. Scaling the vector is lossless, so the output size has no effect on quality.
 Everything is plain bash (`scripts/convert.sh`), so it works the same for Claude and Codex.
 
 Source of truth: https://github.com/logdok/skill_convert_to_svg.git (local copy: `~/.claude/skills/convert-to-svg/`).
@@ -30,7 +31,7 @@ magick -version | head -1 && vtracer --version
 If not stated explicitly in the request, ask:
 
 1. **Canvas size** — `--size WxH` (e.g. `512x512`, `1024x768`; image is fit and centered, so non-square is fine) or `--no-resize` to keep original dimensions. 512x512 is just one example, never a silent default.
-2. **Background** — `--remove-bg` (make a uniform background transparent; optionally `--fuzz 10%` tolerance, default 5%), `--keep-background`, or `--source-alpha`. **Check the source first** (`magick identify -format '%[channels]' f.png`, or the corner pixel via `%[pixel:p{0,0}]`): if it is already transparent (`srgba`, corner alpha 0), use `--source-alpha`, NOT `--remove-bg` — floodfill on an already-transparent image leaves a ragged fringe.
+2. **Background** — `--keep-background` or `--remove-bg` (make a uniform background transparent; optionally `--fuzz 10%` tolerance, default 5%). **Check the source first** (`magick identify -format '%[channels] %[pixel:p{0,0}]' f.png`): if it is already transparent (`srgba`, corner alpha 0), use `--keep-background`. As a safety net the script itself skips `--remove-bg` (prints `NOTE`) for any file whose top-left pixel is already transparent, because floodfill there only adds a fringe.
 3. **Output location / naming** — default is `<input dir>/output/`; optional `--suffix _512` to get `name_512.svg`.
 
 The script refuses to run without a size choice and a background choice.
@@ -48,21 +49,18 @@ S=~/.claude/skills/convert-to-svg/scripts/convert.sh
 ```
 
 Options: `--fuzz N%`, `--keep-prep`, and trace tuning `--mode spline|polygon|none`, `--simplify 1.5`, `--filter-speckle 4`, `--color-precision 5` (these values are the proven defaults).
-Intermediate `prep_*.png` files go to `<output>/.prep/` and are deleted afterwards unless `--keep-prep`.
+With `--remove-bg`, the intermediate `prep_*.png` goes to `<output>/.prep/` and is deleted afterwards unless `--keep-prep`.
 
 Reference command the script is built on:
 
 ```bash
-magick in.png -fuzz 5% -fill none -draw "color 0,0 floodfill" -background none \
-  -filter Lanczos -resize 512x512 -gravity center -extent 512x512 prep.png \
-&& vtracer -i prep.png -o out.svg --mode spline --simplify 1.5 --filter-speckle 4 --color-precision 5
+vtracer -i in.png -o out.svg --mode spline --simplify 1.5 --filter-speckle 4 --color-precision 5
 ```
+(add `magick in.png -fuzz 5% -fill none -draw "color 0,0 floodfill" -background none prep.png` first only for `--remove-bg`; the script then wraps the result for `--size`).
 
 ## 4. Tuning tips
 
-- `--source-alpha` (transparent PNG): flattens onto white, traces at 2x canvas, then deletes every near-white path (backdrop, gaps between parts, anti-aliasing halo) and sets a `viewBox`. Side effect: genuinely white shapes in the art (e.g. eye whites) are removed too — for such art use `--keep-background` instead.
-- Small source (e.g. 256px) → blocky/ragged outline: the 2x supersampling in `--source-alpha` handles it; with other modes upscale via a larger `--size`.
-
+- Ragged/fringed outline → something resampled the raster before tracing (see Pipeline). Trace the original instead.
 - Too noisy/blobby → raise `--filter-speckle` or `--simplify`, lower `--color-precision`.
 - Lost detail → lower `--filter-speckle`/`--simplify`, raise `--color-precision`.
 - Background remains → raise `--fuzz`; floodfill starts at the top-left pixel, so it needs a uniform background corner.

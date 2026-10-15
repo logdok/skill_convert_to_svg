@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Convert raster images (PNG/JPG) to SVG: ImageMagick (prep) -> vtracer (trace).
-# Canvas size, background removal and fuzz are NOT defaulted: they must be passed
-# explicitly (the agent asks the user first).
+# Convert raster images (PNG/JPG) to SVG with vtracer.
+# The raster is NEVER resampled: tracing a Lanczos-upscaled copy rings/blurs the alpha edge
+# and vtracer draws a ragged halo around the outline. Instead the image is traced at its native
+# resolution and the requested canvas is applied to the SVG (viewBox + transform) - lossless.
+# Canvas size and background handling are NOT defaulted: they must be passed explicitly
+# (the agent asks the user first).
 set -euo pipefail
 
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -11,25 +14,24 @@ usage() {
 Usage: convert.sh <input-file-or-dir> [options]
 
 Canvas (REQUIRED, choose exactly one):
-  --size WxH           Resize to fit inside WxH and center on a WxH canvas (e.g. 512x512, 1024x768)
+  --size WxH           Scale the SVG to fit inside WxH and center it on a WxH canvas (e.g. 512x512)
   --no-resize          Keep the original pixel dimensions
 
 Background (REQUIRED, choose exactly one):
-  --remove-bg          Flood-fill the background from the top-left pixel to transparent
-  --keep-background    Do not touch the background
-  --source-alpha       Source PNG already has a transparent background: trace a 2x white-flattened
-                       copy, then drop the white backdrop/halo paths (clean edges, no --remove-bg fringe)
+  --keep-background    Trace the source as is (right choice for PNGs that are already transparent)
+  --remove-bg          Flood-fill a uniform background from the top-left pixel to transparent
+                       (skipped automatically for images whose top-left pixel is already transparent)
   --fuzz N%            Tolerance for --remove-bg (default: 5%)
 
 Output:
   -o, --output DIR     Output directory (default: <input dir>/output)
   --suffix STR         Suffix appended to the output name (default: none; e.g. _512)
-  --keep-prep          Keep intermediate .prep/ files
+  --keep-prep          Keep intermediate .prep/ files (only used with --remove-bg)
 
 vtracer tuning (defaults are proven values):
   --mode MODE          spline | polygon | none            (default: spline)
-  --simplify N         Corner simplification              (default: 1.5; 2 with --source-alpha)
-  --filter-speckle N   Drop speckles smaller than N px    (default: 4; 8 with --source-alpha)
+  --simplify N         Corner simplification              (default: 1.5)
+  --filter-speckle N   Drop speckles smaller than N px    (default: 4)
   --color-precision N  Color bits per channel             (default: 5)
   -h, --help           Show this help
 EOF
@@ -38,7 +40,7 @@ EOF
 SIZE="" ; NO_RESIZE=0
 BG="" ; FUZZ="5%"
 OUT="" ; SUFFIX="" ; KEEP_PREP=0
-MODE="spline" ; SIMPLIFY="" ; SPECKLE="" ; PRECISION="5"
+MODE="spline" ; SIMPLIFY="1.5" ; SPECKLE="4" ; PRECISION="5"
 INPUT=""
 
 while [[ $# -gt 0 ]]; do
@@ -47,7 +49,6 @@ while [[ $# -gt 0 ]]; do
     --no-resize) NO_RESIZE=1; shift ;;
     --remove-bg) BG="remove"; shift ;;
     --keep-background) BG="keep"; shift ;;
-    --source-alpha) BG="alpha"; shift ;;
     --fuzz) FUZZ="$2"; shift 2 ;;
     -o|--output) OUT="$2"; shift 2 ;;
     --suffix) SUFFIX="$2"; shift 2 ;;
@@ -76,21 +77,17 @@ if [[ -n "$SIZE" && ! "$SIZE" =~ ^[0-9]+x[0-9]+$ ]]; then
   echo "Error: --size must look like 512x512" >&2; exit 2
 fi
 if [[ -z "$BG" ]]; then
-  echo "Error: background handling not specified. Pass --remove-bg, --keep-background or --source-alpha (ask the user)." >&2
+  echo "Error: background handling not specified. Pass --keep-background or --remove-bg (ask the user)." >&2
   exit 2
 fi
 
-if [[ "$BG" == "alpha" ]]; then
-  [[ -n "$SIMPLIFY" ]] || SIMPLIFY="2"
-  [[ -n "$SPECKLE" ]] || SPECKLE="8"
-  command -v python3 >/dev/null || { echo "Error: python3 is required for --source-alpha" >&2; exit 3; }
-else
-  [[ -n "$SIMPLIFY" ]] || SIMPLIFY="1.5"
-  [[ -n "$SPECKLE" ]] || SPECKLE="4"
-fi
-
-command -v magick >/dev/null || { echo "Error: ImageMagick ('magick') not found. See SKILL.md for install steps." >&2; exit 3; }
 command -v vtracer >/dev/null || { echo "Error: 'vtracer' not found. See SKILL.md for install steps." >&2; exit 3; }
+if [[ "$BG" == "remove" ]]; then
+  command -v magick >/dev/null || { echo "Error: ImageMagick ('magick') not found (needed for --remove-bg). See SKILL.md." >&2; exit 3; }
+fi
+if [[ -n "$SIZE" ]]; then
+  command -v python3 >/dev/null || { echo "Error: python3 is required for --size" >&2; exit 3; }
+fi
 
 # Collect input files
 files=()
@@ -107,58 +104,55 @@ fi
 
 [[ -n "$OUT" ]] || OUT="$base_dir/output"
 PREP="$OUT/.prep"
-mkdir -p "$OUT" "$PREP"
+mkdir -p "$OUT"
+[[ "$BG" == "remove" ]] && mkdir -p "$PREP"
+
+# Fit the traced SVG onto a W x H canvas: new header + one <g transform> around the paths
+fit_canvas() {
+  python3 -I - "$1" "$2" <<'PY'
+import re, sys
+path, size = sys.argv[1], sys.argv[2]
+cw, ch = (int(v) for v in size.split("x"))
+s = open(path).read()
+m = re.search(r'<svg\b[^>]*\bwidth="(\d+)"[^>]*\bheight="(\d+)"[^>]*>', s)
+w, h = int(m.group(1)), int(m.group(2))
+k = min(cw / w, ch / h)
+tx, ty = (cw - w * k) / 2, (ch - h * k) / 2
+head = '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">' % (cw, ch, cw, ch)
+body = s[m.end():s.rindex("</svg>")]
+if (k, tx, ty) != (1, 0, 0):
+    body = '\n<g transform="translate(%.4g %.4g) scale(%.6g)">%s</g>\n' % (tx, ty, k, body)
+open(path, "w").write(s[:m.start()] + head + body + "</svg>\n")
+PY
+}
 
 ok=0 ; fail=0
 for src in "${files[@]}"; do
   name="$(basename "$src")"; name="${name%.*}"
-  prep="$PREP/prep_${name}.png"
   dst="$OUT/${name}${SUFFIX}.svg"
 
-  if [[ "$BG" == "alpha" ]]; then
-    # Canvas W x H; trace at 2x, then shrink back through the SVG viewBox
-    canvas="${SIZE:-$(magick identify -format '%wx%h' "$src[0]")}"
-    cw="${canvas%x*}" ; ch="${canvas#*x}"
-    if magick "$src" -background white -alpha remove -alpha off -filter Lanczos \
-         -resize "$((cw*2))x$((ch*2))" -gravity center -extent "$((cw*2))x$((ch*2))" "$prep" \
-       && vtracer -i "$prep" -o "$dst" --mode "$MODE" --simplify "$SIMPLIFY" \
-            --filter-speckle "$SPECKLE" --color-precision "$PRECISION" \
-            --corner-threshold 90 --segment-length 6 \
-       && python3 -I - "$dst" "$cw" "$ch" <<'PY'
-import re, sys
-path, w, h = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-s = open(path).read()
-def near_white(tag):
-    m = re.search(r'fill="#([0-9A-Fa-f]{6})"', tag)
-    return bool(m) and min(int(m.group(1)[i:i+2], 16) for i in (0, 2, 4)) >= 200
-# Drop the white backdrop, the gaps and the anti-aliasing halo (all near-white paths)
-s = re.sub(r'<path[^>]*/>\n?', lambda m: '' if near_white(m.group(0)) else m.group(0), s)
-s = re.sub(r'width="\d+" height="\d+"', 'width="%d" height="%d" viewBox="0 0 %d %d"' % (w, h, w * 2, h * 2), s, count=1)
-open(path, 'w').write(s)
-PY
-    then echo "OK   $src -> $dst"; ok=$((ok+1))
-    else echo "FAIL $src" >&2; fail=$((fail+1))
+  trace_in="$src"
+  if [[ "$BG" == "remove" ]]; then
+    # Floodfill on an already-transparent corner only adds a ragged fringe: skip it then
+    corner_alpha="$(magick "$src[0]" -format '%[fx:p{0,0}.a]' info: 2>/dev/null || echo 1)"
+    if [[ "$corner_alpha" == "0" ]]; then
+      echo "NOTE $src already has a transparent background: --remove-bg skipped" >&2
+    else
+      trace_in="$PREP/prep_${name}.png"
+      magick "$src" -fuzz "$FUZZ" -fill none -draw "color 0,0 floodfill" -background none "$trace_in" || { echo "FAIL $src" >&2; fail=$((fail+1)); continue; }
     fi
-    continue
   fi
 
-  args=("$src")
-  [[ "$BG" == "remove" ]] && args+=(-fuzz "$FUZZ" -fill none -draw "color 0,0 floodfill")
-  args+=(-background none)
-  if [[ -n "$SIZE" ]]; then
-    args+=(-filter Lanczos -resize "$SIZE" -gravity center -extent "$SIZE")
-  fi
-
-  if magick "${args[@]}" "$prep" \
-     && vtracer -i "$prep" -o "$dst" --mode "$MODE" --simplify "$SIMPLIFY" \
-          --filter-speckle "$SPECKLE" --color-precision "$PRECISION"; then
+  if vtracer -i "$trace_in" -o "$dst" --mode "$MODE" --simplify "$SIMPLIFY" \
+       --filter-speckle "$SPECKLE" --color-precision "$PRECISION" \
+     && { [[ -z "$SIZE" ]] || fit_canvas "$dst" "$SIZE"; }; then
     echo "OK   $src -> $dst"; ok=$((ok+1))
   else
     echo "FAIL $src" >&2; fail=$((fail+1))
   fi
 done
 
-[[ $KEEP_PREP -eq 1 ]] || rm -rf "$PREP"
+[[ $KEEP_PREP -eq 1 || "$BG" != "remove" ]] || rm -rf "$PREP"
 
 echo "Done: $ok converted, $fail failed. Output: $OUT"
 [[ $fail -eq 0 ]]
