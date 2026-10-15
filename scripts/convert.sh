@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Convert raster images (PNG/JPG) to SVG with vtracer.
+# Convert raster images (PNG, JPG, WebP, BMP, GIF, TIFF) to SVG with vtracer.
 # The raster is NEVER resampled: tracing a Lanczos-upscaled copy rings/blurs the alpha edge
 # and vtracer draws a ragged halo around the outline. Instead the image is traced at its native
 # resolution and the requested canvas is applied to the SVG (viewBox + transform) - lossless.
@@ -94,13 +94,13 @@ files=()
 if [[ -d "$INPUT" ]]; then
   base_dir="${INPUT%/}"
   while IFS= read -r -d '' f; do files+=("$f"); done < <(
-    find "$base_dir" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \) -print0 | sort -z
+    find "$base_dir" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.bmp' -o -iname '*.gif' -o -iname '*.tif' -o -iname '*.tiff' \) -print0 | sort -z
   )
 else
   base_dir="$(dirname "$INPUT")"
   files=("$INPUT")
 fi
-[[ ${#files[@]} -gt 0 ]] || { echo "Error: no PNG/JPG files found in $INPUT" >&2; exit 2; }
+[[ ${#files[@]} -gt 0 ]] || { echo "Error: no supported images (png, jpg, webp, bmp, gif, tiff) found in $INPUT" >&2; exit 2; }
 
 [[ -n "$OUT" ]] || OUT="$base_dir/output"
 PREP="$OUT/.prep"

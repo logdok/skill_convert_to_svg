@@ -1,6 +1,6 @@
 ---
 name: convert-to-svg
-description: Convert raster images (PNG/JPG/JPEG) to SVG on macOS using ImageMagick + vtracer, for a single file or a whole folder. Use when the user asks to convert/vectorize/trace an image to SVG, e.g. "сконвертируй картинку в svg", "сделай из png векторный файл 512x512", "vectorize these icons", "png to svg". Canvas size and background handling are always confirmed with the user, never assumed.
+description: Convert raster images (PNG/JPG/JPEG/WebP/BMP/GIF/TIFF) to SVG on macOS using ImageMagick + vtracer, for a single file or a whole folder. Use when the user asks to convert/vectorize/trace an image to SVG, e.g. "сконвертируй картинку в svg", "сделай из png векторный файл 512x512", "vectorize these icons", "png to svg". Canvas size and background handling are always confirmed with the user, never assumed.
 ---
 
 # convert-to-svg
@@ -44,7 +44,7 @@ S=~/.claude/skills/convert-to-svg/scripts/convert.sh
 # single file
 "$S" path/to/cat.png --size 512x512 --remove-bg --suffix _512
 
-# whole folder (all *.png, *.jpg, *.jpeg, non-recursive)
+# whole folder (all *.png, *.jpg, *.jpeg, *.webp, *.bmp, *.gif, *.tif, *.tiff, non-recursive)
 "$S" path/to/folder/ --size 1024x768 --keep-background -o path/to/out
 ```
 
