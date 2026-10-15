@@ -63,6 +63,7 @@ vtracer -i in.png -o out.svg --mode spline --simplify 1.5 --filter-speckle 4 --c
 - Ragged/fringed outline → something resampled the raster before tracing (see Pipeline). Trace the original instead.
 - Too noisy/blobby → raise `--filter-speckle` or `--simplify`, lower `--color-precision`.
 - Lost detail → lower `--filter-speckle`/`--simplify`, raise `--color-precision`.
+- Gray halo around the outline on an opaque (JPG-like/white-background) source → raise `--fuzz` to ~25%: the anti-aliased light-gray edge pixels are outside the default 5% tolerance, so vtracer traces them as a gray ring. Measured on a 256px horse: 5% left a ring around hooves/tail, 25% removed it and kept the inner lines; heavy `--filter-speckle`/`--color-precision` reduction only blurred detail.
 - Background remains → raise `--fuzz`; floodfill starts at the top-left pixel, so it needs a uniform background corner.
 
 ## 5. Maintaining this skill
