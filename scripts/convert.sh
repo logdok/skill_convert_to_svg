@@ -23,7 +23,7 @@ Canvas (REQUIRED, choose exactly one):
 Background (REQUIRED, choose exactly one):
   --keep-background    Trace the source as is (right choice for PNGs that are already transparent)
   --remove-bg          Flood-fill a uniform background from the top-left pixel to transparent
-                       (skipped automatically for images whose top-left pixel is already transparent)
+                       (skipped automatically for images whose four corners are already transparent)
   --fuzz N%            Tolerance for --remove-bg (default: 5%)
 
 Output:
