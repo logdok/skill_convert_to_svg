@@ -133,13 +133,18 @@ for src in "${files[@]}"; do
 
   trace_in="$src"
   if [[ "$BG" == "remove" ]]; then
-    # Floodfill on an already-transparent corner only adds a ragged fringe: skip it then
-    corner_alpha="$(magick "$src[0]" -format '%[fx:p{0,0}.a]' info: 2>/dev/null || echo 1)"
-    if [[ "$corner_alpha" == "0" ]]; then
+    # Floodfill on an already-transparent image only adds a ragged fringe: skip it then.
+    # All four corners must be transparent (a stray transparent pixel does not count).
+    corners_alpha="$(magick "$src[0]" -format '%[fx:p{0,0}.a+p{w-1,0}.a+p{0,h-1}.a+p{w-1,h-1}.a]' info: 2>/dev/null || echo 4)"
+    if [[ "$corners_alpha" == "0" ]]; then
       echo "NOTE $src already has a transparent background: --remove-bg skipped" >&2
     else
+      # Flatten stray transparent pixels onto the background colour so the floodfill sees one uniform area
+      bg_color="$(magick "$src[0]" -format '%[pixel:p{w-1,h-1}]' info:)"
       trace_in="$PREP/prep_${name}.png"
-      magick "$src" -fuzz "$FUZZ" -fill none -draw "color 0,0 floodfill" -background none "$trace_in" || { echo "FAIL $src" >&2; fail=$((fail+1)); continue; }
+      magick "$src" -background "$bg_color" -alpha remove -alpha off -alpha set \
+        -fuzz "$FUZZ" -fill none -draw "color 0,0 floodfill" -background none "$trace_in" \
+        || { echo "FAIL $src" >&2; fail=$((fail+1)); continue; }
     fi
   fi
 

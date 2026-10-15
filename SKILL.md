@@ -31,7 +31,7 @@ magick -version | head -1 && vtracer --version
 If not stated explicitly in the request, ask:
 
 1. **Canvas size** — `--size WxH` (e.g. `512x512`, `1024x768`; image is fit and centered, so non-square is fine) or `--no-resize` to keep original dimensions. 512x512 is just one example, never a silent default.
-2. **Background** — `--keep-background` or `--remove-bg` (make a uniform background transparent; optionally `--fuzz 10%` tolerance, default 5%). **Check the source first** (`magick identify -format '%[channels] %[pixel:p{0,0}]' f.png`): if it is already transparent (`srgba`, corner alpha 0), use `--keep-background`. As a safety net the script itself skips `--remove-bg` (prints `NOTE`) for any file whose top-left pixel is already transparent, because floodfill there only adds a fringe.
+2. **Background** — `--keep-background` or `--remove-bg` (make a uniform background transparent; optionally `--fuzz 10%` tolerance, default 5%). **Check the source first** (`magick identify -format '%[channels] %[pixel:p{0,0}]' f.png`): if it is already transparent (`srgba`, corner alpha 0), use `--keep-background`. As a safety net the script itself skips `--remove-bg` (prints `NOTE`) for any file whose four corners are all transparent, because floodfill there only adds a fringe. One stray transparent corner pixel does not count (e.g. an opaque white image with 2 transparent pixels): such a file is flattened onto its background colour first, then floodfilled.
 3. **Output location / naming** — default is `<input dir>/output/`; optional `--suffix _512` to get `name_512.svg`.
 
 The script refuses to run without a size choice and a background choice.
