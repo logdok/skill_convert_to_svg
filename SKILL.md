@@ -30,7 +30,7 @@ magick -version | head -1 && vtracer --version
 If not stated explicitly in the request, ask:
 
 1. **Canvas size** — `--size WxH` (e.g. `512x512`, `1024x768`; image is fit and centered, so non-square is fine) or `--no-resize` to keep original dimensions. 512x512 is just one example, never a silent default.
-2. **Background** — `--remove-bg` (make the background transparent; optionally `--fuzz 10%` tolerance, default 5%) or `--keep-background`.
+2. **Background** — `--remove-bg` (make a uniform background transparent; optionally `--fuzz 10%` tolerance, default 5%), `--keep-background`, or `--source-alpha`. **Check the source first** (`magick identify -format '%[channels]' f.png`, or the corner pixel via `%[pixel:p{0,0}]`): if it is already transparent (`srgba`, corner alpha 0), use `--source-alpha`, NOT `--remove-bg` — floodfill on an already-transparent image leaves a ragged fringe.
 3. **Output location / naming** — default is `<input dir>/output/`; optional `--suffix _512` to get `name_512.svg`.
 
 The script refuses to run without a size choice and a background choice.
@@ -59,6 +59,9 @@ magick in.png -fuzz 5% -fill none -draw "color 0,0 floodfill" -background none \
 ```
 
 ## 4. Tuning tips
+
+- `--source-alpha` (transparent PNG): flattens onto white, traces at 2x canvas, then deletes every near-white path (backdrop, gaps between parts, anti-aliasing halo) and sets a `viewBox`. Side effect: genuinely white shapes in the art (e.g. eye whites) are removed too — for such art use `--keep-background` instead.
+- Small source (e.g. 256px) → blocky/ragged outline: the 2x supersampling in `--source-alpha` handles it; with other modes upscale via a larger `--size`.
 
 - Too noisy/blobby → raise `--filter-speckle` or `--simplify`, lower `--color-precision`.
 - Lost detail → lower `--filter-speckle`/`--simplify`, raise `--color-precision`.
