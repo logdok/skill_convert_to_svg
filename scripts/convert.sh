@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Convert raster images (PNG, JPG, WebP, BMP, GIF, TIFF) to SVG with vtracer.
-# The raster is NEVER resampled: tracing a Lanczos-upscaled copy rings/blurs the alpha edge
-# and vtracer draws a ragged halo around the outline. Instead the image is traced at its native
-# resolution and the requested canvas is applied to the SVG (viewBox + transform) - lossless.
+# By default the image is traced at its native resolution and the requested canvas is applied
+# to the SVG itself (viewBox + transform) - lossless.
+# Optional --upscale first enlarges a smaller source with the Mitchell filter. NEVER use Lanczos
+# for that: its negative lobes ring on the alpha edge and vtracer then draws a ragged halo.
 # Canvas size and background handling are NOT defaulted: they must be passed explicitly
 # (the agent asks the user first).
 set -euo pipefail
@@ -16,6 +17,8 @@ Usage: convert.sh <input-file-or-dir> [options]
 Canvas (REQUIRED, choose exactly one):
   --size WxH           Scale the SVG to fit inside WxH and center it on a WxH canvas (e.g. 512x512)
   --no-resize          Keep the original pixel dimensions
+  --upscale            With --size and a smaller source: enlarge the raster (Mitchell filter) before
+                       tracing. Experimental: more detail on some images, bumpier edges on others
 
 Background (REQUIRED, choose exactly one):
   --keep-background    Trace the source as is (right choice for PNGs that are already transparent)
@@ -26,7 +29,7 @@ Background (REQUIRED, choose exactly one):
 Output:
   -o, --output DIR     Output directory (default: <input dir>/output)
   --suffix STR         Suffix appended to the output name (default: none; e.g. _512)
-  --keep-prep          Keep intermediate .prep/ files (only used with --remove-bg)
+  --keep-prep          Keep intermediate .prep/ files (--remove-bg and upscaling)
 
 vtracer tuning (defaults are proven values):
   --mode MODE          spline | polygon | none            (default: spline)
@@ -37,7 +40,7 @@ vtracer tuning (defaults are proven values):
 EOF
 }
 
-SIZE="" ; NO_RESIZE=0
+SIZE="" ; NO_RESIZE=0 ; UPSCALE=0
 BG="" ; FUZZ="5%"
 OUT="" ; SUFFIX="" ; KEEP_PREP=0
 MODE="spline" ; SIMPLIFY="1.5" ; SPECKLE="4" ; PRECISION="5"
@@ -47,6 +50,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --size) SIZE="$2"; shift 2 ;;
     --no-resize) NO_RESIZE=1; shift ;;
+    --upscale) UPSCALE=1; shift ;;
     --remove-bg) BG="remove"; shift ;;
     --keep-background) BG="keep"; shift ;;
     --fuzz) FUZZ="$2"; shift 2 ;;
@@ -82,8 +86,8 @@ if [[ -z "$BG" ]]; then
 fi
 
 command -v vtracer >/dev/null || { echo "Error: 'vtracer' not found. See SKILL.md for install steps." >&2; exit 3; }
-if [[ "$BG" == "remove" ]]; then
-  command -v magick >/dev/null || { echo "Error: ImageMagick ('magick') not found (needed for --remove-bg). See SKILL.md." >&2; exit 3; }
+if [[ "$BG" == "remove" || ( -n "$SIZE" && $UPSCALE -eq 1 ) ]]; then
+  command -v magick >/dev/null || { echo "Error: ImageMagick ('magick') not found (needed for --remove-bg and --upscale). See SKILL.md." >&2; exit 3; }
 fi
 if [[ -n "$SIZE" ]]; then
   command -v python3 >/dev/null || { echo "Error: python3 is required for --size" >&2; exit 3; }
@@ -104,8 +108,7 @@ fi
 
 [[ -n "$OUT" ]] || OUT="$base_dir/output"
 PREP="$OUT/.prep"
-mkdir -p "$OUT"
-[[ "$BG" == "remove" ]] && mkdir -p "$PREP"
+mkdir -p "$OUT" "$PREP"
 
 # Fit the traced SVG onto a W x H canvas: new header + one <g transform> around the paths
 fit_canvas() {
@@ -148,6 +151,18 @@ for src in "${files[@]}"; do
     fi
   fi
 
+  # Opt-in: upscale (never downscale) to the canvas fit with Mitchell before tracing
+  if [[ -n "$SIZE" && $UPSCALE -eq 1 ]]; then
+    read -r sw sh < <(magick identify -format '%w %h\n' "$trace_in[0]")
+    cw="${SIZE%x*}" ; ch="${SIZE#*x}"
+    if (( sw < cw && sh < ch )); then
+      up_in="$PREP/up_${name}.png"
+      magick "$trace_in" -background none -filter Mitchell -resize "${cw}x${ch}" "$up_in" \
+        || { echo "FAIL $src" >&2; fail=$((fail+1)); continue; }
+      trace_in="$up_in"
+    fi
+  fi
+
   if vtracer -i "$trace_in" -o "$dst" --mode "$MODE" --simplify "$SIMPLIFY" \
        --filter-speckle "$SPECKLE" --color-precision "$PRECISION" \
      && { [[ -z "$SIZE" ]] || fit_canvas "$dst" "$SIZE"; }; then
@@ -157,7 +172,7 @@ for src in "${files[@]}"; do
   fi
 done
 
-[[ $KEEP_PREP -eq 1 || "$BG" != "remove" ]] || rm -rf "$PREP"
+[[ $KEEP_PREP -eq 1 ]] || rm -rf "$PREP"
 
 echo "Done: $ok converted, $fail failed. Output: $OUT"
 [[ $fail -eq 0 ]]
