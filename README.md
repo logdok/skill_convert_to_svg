@@ -48,14 +48,15 @@ The result is the same clean outline you get from running `vtracer` by hand on t
 - **Single file or whole folder** — PNG, JPG/JPEG, WebP, BMP, GIF and TIFF.
 - **Explicit by design** — canvas size and background handling are *required*. The script refuses to guess, and the agent asks you instead of assuming.
 - **Tunable tracing** — vtracer's `--simplify`, `--filter-speckle`, `--color-precision` and `--mode` are exposed.
+- **Optional flat-icon cleanup** — `--flat-palette` removes intermediate edge colors before tracing, so flat fills and outlines can stay clean with fewer SVG paths.
 - **Plain bash** — no wrapper framework. Use it from an agent or straight from your terminal.
 
 ## Requirements
 
 - macOS (developed and tested here; the script is plain bash and may work on Linux, but that is untested)
 - [vtracer](https://github.com/visioncortex/vtracer) CLI
-- `python3` (only used when `--size` is given)
-- [ImageMagick](https://imagemagick.org) (only used for `--remove-bg` and `--upscale`)
+- `python3` (used for `--size` and `--flat-palette`; no extra Python packages)
+- [ImageMagick](https://imagemagick.org) (used for `--remove-bg`, `--upscale` and `--flat-palette`)
 
 ```bash
 brew install imagemagick
@@ -122,6 +123,9 @@ scripts/convert.sh logo.png --size 1024x768 --keep-background
 | `--keep-background` | Trace the source as is (right for already-transparent images) |
 | `--remove-bg` | Flood-fill a uniform background from the top-left pixel to transparent. Skipped automatically if all four corners are already transparent |
 | `--fuzz N%` | Tolerance for `--remove-bg` (default `5%`) |
+| `--flat-palette LIST` | Clean flat artwork before tracing, using explicit comma-separated `#RRGGBB` colors; forces trace color precision 8 |
+| `--flat-neutral N` | Channel-spread threshold for mapping near-gray pixels to neutral palette entries (default `20`, `0` disables) |
+| `--flat-alpha N` | Opacity cutoff for flat cleanup, `1`–`255` (default `128`) |
 | `--upscale` | With `--size` and a smaller source: enlarge the raster (Mitchell filter) before tracing. Experimental |
 | `-o, --output DIR` | Output folder (default `<input dir>/output`) |
 | `--suffix STR` | Append a suffix to the file name, e.g. `_512` → `name_512.svg` |
@@ -133,6 +137,23 @@ scripts/convert.sh logo.png --size 1024x768 --keep-background
 
 ## Tuning tips
 
+### Clean outlines and small files for flat icons
+
+If a simple drawing produces gray patches or colored fragments along its outlines, use a small palette **before tracing**. Recoloring finished paths keeps the unwanted boundaries. Include every intended solid fill and outline color; choose colors from opaque interiors, not antialias pixels.
+
+```bash
+# Example palette for one illustration; replace it with your own artwork's colors.
+scripts/convert.sh icon.png --no-resize --keep-background \
+  --flat-palette '#000000,#E4BC96,#009245,#4E9DC4,#3E489D,#8F0000' \
+  --simplify 0.8 --filter-speckle 4 -o clean_svg
+```
+
+The cleanup keeps native dimensions, protects neutral outlines from being mapped to colored fills, and thresholds alpha into solid shapes. A tested 266×336 illustration improved from 15,841 to 4,122 bytes (74% smaller) while removing gray fragments. That example used speckle 12; start with 4 or lower for small eyes and other meaningful details. Inspect the result at normal size and zoomed in before increasing speckle filtering.
+
+Use this mode for **opaque, flat-color illustrations**. Keep the normal pipeline for photos, gradients and translucent artwork. Include white/gray in the palette when they are intentional fills. Preserve the original file and compare silhouettes, holes, tiny details and transparency. Use an actual alpha composite as reference: hidden RGB in transparent pixels can look like visible shapes in a faulty thumbnail.
+
+### Other adjustments
+
 - **Ragged or fringed outline** → the raster was upscaled with Lanczos (or similar) before tracing. Trace the original.
 - **Gray ring around the outline on an opaque (white-background) image** → raise `--fuzz` to about `25%`. The anti-aliased light-gray edge pixels fall outside the default `5%` tolerance, so they get traced as a ring.
 - **Blocky detail on a small source** → try `--upscale` and compare with the default. It helps some images and hurts others.
@@ -140,14 +161,23 @@ scripts/convert.sh logo.png --size 1024x768 --keep-background
 - **Lost detail** → lower `--filter-speckle` / `--simplify`, raise `--color-precision`.
 - **Background remains** → raise `--fuzz`. The flood-fill starts at the top-left pixel, so the background needs a uniform corner.
 
+### Small source, large output
+
+For a small image that needs a 512×512 SVG, use `--size 512x512` without `--upscale`. The original pixels are traced first. Only the SVG canvas and one parent transform change afterward, so contours are identical to a `--no-resize` conversion with the same other options.
+
+A 262×206 image fits in 512×512 at scale 1.9542, centered with about 54.718 units above and below. It is not stretched to a square. In the tested food illustration, all 27 paths stayed identical and resizing added less than 100 bytes to an approximately 8.7 KB SVG. The test suite verifies this for normal and flat-palette conversion, including native preparation dimensions and unchanged source bytes.
+
+Scaling the vector does not add raster blur. Tracing itself is still an approximation: tiny details missing from the source cannot be recovered just by requesting a larger canvas.
+
 ## How it works
 
 ```
-source ──► (optional) flood-fill background ──► vtracer (native resolution) ──► fit to canvas ──► .svg
-              only for --remove-bg                spline, no resampling          viewBox + transform
+source → optional background removal → optional flat palette cleanup → vtracer → fit SVG canvas
 ```
 
 `--size` rewrites the SVG header to the `width`/`height`/`viewBox` of the canvas and wraps the paths in a single `<g transform="translate(…) scale(…)">`. With `--no-resize` the tracer output is left untouched.
+
+The flat cleanup helper uses ImageMagick and Python's standard library. Run `python3 scripts/test_flat.py` to verify alpha handling, neutral outlines, palette colors, and conversion with a non-square canvas.
 
 ## Credits
 

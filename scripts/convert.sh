@@ -4,6 +4,7 @@
 # to the SVG itself (viewBox + transform) - lossless.
 # Optional --upscale first enlarges a smaller source with the Mitchell filter. NEVER use Lanczos
 # for that: its negative lobes ring on the alpha edge and vtracer then draws a ragged halo.
+# Optional --flat-palette cleans flat artwork before tracing, keeping gray edge fragments neutral.
 # Canvas size and background handling are NOT defaulted: they must be passed explicitly
 # (the agent asks the user first).
 set -euo pipefail
@@ -26,6 +27,11 @@ Background (REQUIRED, choose exactly one):
                        (skipped automatically for images whose four corners are already transparent)
   --fuzz N%            Tolerance for --remove-bg (default: 5%)
 
+Flat artwork cleanup (opt-in; not for photos, gradients or translucent art):
+  --flat-palette LIST  Quantize BEFORE tracing; comma-separated #RRGGBB colors, including outlines
+  --flat-neutral N     Neutral RGB spread threshold (0 disables; default: 20 out of 255)
+  --flat-alpha N       Alpha cutoff for solid shapes (1..255; default: 128)
+
 Output:
   -o, --output DIR     Output directory (default: <input dir>/output)
   --suffix STR         Suffix appended to the output name (default: none; e.g. _512)
@@ -44,7 +50,9 @@ SIZE="" ; NO_RESIZE=0 ; UPSCALE=0
 BG="" ; FUZZ="5%"
 OUT="" ; SUFFIX="" ; KEEP_PREP=0
 MODE="spline" ; SIMPLIFY="1.5" ; SPECKLE="4" ; PRECISION="5"
+FLAT_PALETTE="" ; FLAT_NEUTRAL="20" ; FLAT_ALPHA="128"
 INPUT=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +62,9 @@ while [[ $# -gt 0 ]]; do
     --remove-bg) BG="remove"; shift ;;
     --keep-background) BG="keep"; shift ;;
     --fuzz) FUZZ="$2"; shift 2 ;;
+    --flat-palette) FLAT_PALETTE="$2"; shift 2 ;;
+    --flat-neutral) FLAT_NEUTRAL="$2"; shift 2 ;;
+    --flat-alpha) FLAT_ALPHA="$2"; shift 2 ;;
     -o|--output) OUT="$2"; shift 2 ;;
     --suffix) SUFFIX="$2"; shift 2 ;;
     --keep-prep) KEEP_PREP=1; shift ;;
@@ -80,17 +91,20 @@ fi
 if [[ -n "$SIZE" && ! "$SIZE" =~ ^[0-9]+x[0-9]+$ ]]; then
   echo "Error: --size must look like 512x512" >&2; exit 2
 fi
+if [[ -n "$SIZE" ]] && (( 10#${SIZE%x*} == 0 || 10#${SIZE#*x} == 0 )); then
+  echo "Error: canvas dimensions must be positive" >&2; exit 2
+fi
 if [[ -z "$BG" ]]; then
   echo "Error: background handling not specified. Pass --keep-background or --remove-bg (ask the user)." >&2
   exit 2
 fi
 
 command -v vtracer >/dev/null || { echo "Error: 'vtracer' not found. See SKILL.md for install steps." >&2; exit 3; }
-if [[ "$BG" == "remove" || ( -n "$SIZE" && $UPSCALE -eq 1 ) ]]; then
-  command -v magick >/dev/null || { echo "Error: ImageMagick ('magick') not found (needed for --remove-bg and --upscale). See SKILL.md." >&2; exit 3; }
+if [[ "$BG" == "remove" || -n "$FLAT_PALETTE" || ( -n "$SIZE" && $UPSCALE -eq 1 ) ]]; then
+  command -v magick >/dev/null || { echo "Error: ImageMagick ('magick') not found (needed for image preparation). See SKILL.md." >&2; exit 3; }
 fi
-if [[ -n "$SIZE" ]]; then
-  command -v python3 >/dev/null || { echo "Error: python3 is required for --size" >&2; exit 3; }
+if [[ -n "$SIZE" || -n "$FLAT_PALETTE" ]]; then
+  command -v python3 >/dev/null || { echo "Error: python3 is required for --size and --flat-palette" >&2; exit 3; }
 fi
 
 # Collect input files
@@ -124,7 +138,7 @@ tx, ty = (cw - w * k) / 2, (ch - h * k) / 2
 head = '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">' % (cw, ch, cw, ch)
 body = s[m.end():s.rindex("</svg>")]
 if (k, tx, ty) != (1, 0, 0):
-    body = '\n<g transform="translate(%.4g %.4g) scale(%.6g)">%s</g>\n' % (tx, ty, k, body)
+    body = '\n<g transform="translate(%.12g %.12g) scale(%.12g)">%s</g>\n' % (tx, ty, k, body)
 open(path, "w").write(s[:m.start()] + head + body + "</svg>\n")
 PY
 }
@@ -163,8 +177,19 @@ for src in "${files[@]}"; do
     fi
   fi
 
+  trace_precision="$PRECISION"
+  if [[ -n "$FLAT_PALETTE" ]]; then
+    flat_in="$PREP/flat_${name}.png"
+    if ! python3 -I "$SCRIPT_DIR/prepare_flat.py" "$trace_in" "$flat_in" \
+         --palette "$FLAT_PALETTE" --neutral-threshold "$FLAT_NEUTRAL" --alpha-threshold "$FLAT_ALPHA"; then
+      echo "FAIL $src (flat palette preparation)" >&2; fail=$((fail+1)); continue
+    fi
+    trace_in="$flat_in"
+    trace_precision="8" # Do not merge explicitly selected palette colors again.
+  fi
+
   if vtracer -i "$trace_in" -o "$dst" --mode "$MODE" --simplify "$SIMPLIFY" \
-       --filter-speckle "$SPECKLE" --color-precision "$PRECISION" \
+       --filter-speckle "$SPECKLE" --color-precision "$trace_precision" \
      && { [[ -z "$SIZE" ]] || fit_canvas "$dst" "$SIZE"; }; then
     echo "OK   $src -> $dst"; ok=$((ok+1))
   else
