@@ -6,7 +6,7 @@ description: Convert raster images (PNG/JPG/JPEG/WebP/BMP/GIF/TIFF) to SVG on ma
 # convert-to-svg
 
 Pipeline: optional background removal → optional flat-color cleanup → **vtracer** at NATIVE resolution → requested SVG canvas (`viewBox` + one `<g transform>`). ImageMagick decodes/encodes preparation files; the flat-color helper uses only Python's standard library.
-**Never upscale the raster to meet the SVG canvas size.** Trace the source at native resolution, then fit the vector into the requested canvas. Raster enlargement can create fringes (observed with Lanczos on a 256px transparent tiger) and cannot add genuine source detail. The script does not offer a raster-upscale option.
+**Never upscale the raster to meet the SVG canvas size.** Trace the source at native resolution, then fit the vector into the requested canvas. Raster enlargement can create fringes and cannot add genuine source detail. The script does not offer a raster-upscale option.
 Everything is plain bash (`scripts/convert.sh`), so it works the same for Claude Code and Codex.
 
 Source of truth: https://github.com/logdok/skill_convert_to_svg.git. Skill folder: `~/.claude/skills/convert-to-svg/` (Claude Code) or `~/.codex/skills/convert-to-svg/` (Codex).

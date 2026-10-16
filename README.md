@@ -20,28 +20,15 @@
 
 ## Why this exists
 
-[vtracer](https://github.com/visioncortex/vtracer) turns raster images into SVG very well, but the obvious "prepare the image first" steps can ruin the result:
-
-- **Upscaling a small icon with Lanczos** rings on the edge of the alpha channel, and the tracer faithfully draws that ringing as a **ragged, dashed halo around the outline**.
-- **Flood-filling the background of an image that is *already transparent*** only adds more fringe.
+`convert-to-svg` traces the source image at its native resolution and fits the resulting vector into the requested SVG canvas. It also handles a uniform background when transparency is requested, while preserving images that are already transparent.
 
 <p align="center">
-  <img src="assets/comparison.png" alt="Tiger source at 256 pixels, raster upscale then trace, and native trace followed by SVG scaling" width="900">
+  <img src="assets/native-to-svg.png" alt="Original tiger PNG at 256 by 256 pixels and the resulting SVG on a 512 by 512 canvas" width="900">
 </p>
 
-The left panel shows the [256×256 tiger source](assets/tiger-source-256.png) at its native size. The right panel uses that same source: `vtracer` traces its original pixels, then the [512×512 SVG](assets/tiger-native-512.svg) scales those same paths by 2. The middle panel shows the earlier raster-upscale approach for comparison. The new SVG contains the same 116 paths as its 256×256 trace; only its canvas and parent transform differ.
+The [256×256 PNG](assets/tiger-source-256.png) is traced at its original size. The [512×512 SVG](assets/tiger-native-512.svg) scales those same vector paths by 2; its canvas and parent transform change, while the paths remain identical.
 
-`convert-to-svg` avoids both:
-
-| Step | Naive pipeline | convert-to-svg |
-| --- | --- | --- |
-| Trace | on a Lanczos-upscaled copy | on the **original pixels** |
-| Output size | resize the raster, then trace | trace, then fit the **vector** to the canvas (`viewBox` + one transform) — lossless |
-| Background | always flood-fill | skipped automatically when the image is **already transparent** |
-
-The result is the same clean outline you get from running `vtracer` by hand on the original file — plus a canvas of any size, centered.
-
-> **Honest trade-off:** tracing a very small source (for example 256 px) cannot recover detail missing from its pixels. A larger SVG canvas makes the traced paths scalable; a sharper source is needed for finer detail.
+Scaling the SVG does not add raster blur. Tracing cannot recover details absent from the original image, so a sharper source is still needed for finer detail.
 
 ## Features
 
@@ -155,7 +142,7 @@ Use this mode for **opaque, flat-color illustrations**. Keep the normal pipeline
 
 ### Other adjustments
 
-- **Ragged or fringed outline** → the raster was upscaled with Lanczos (or similar) before tracing. Trace the original.
+- **Ragged or fringed outline** → inspect the source edge and background handling; trace the native source pixels.
 - **Gray ring around the outline on an opaque (white-background) image** → raise `--fuzz` to about `25%`. The anti-aliased light-gray edge pixels fall outside the default `5%` tolerance, so they get traced as a ring.
 - **Blocky detail on a small source** → use a sharper source or simplify the icon design; increasing the SVG canvas cannot recover absent detail.
 - **Noisy or blobby result** → raise `--filter-speckle` or `--simplify`, lower `--color-precision`.
@@ -183,7 +170,7 @@ The flat cleanup helper uses ImageMagick and Python's standard library. Run `pyt
 ## Credits
 
 - [vtracer](https://github.com/visioncortex/vtracer) by VisionCortex does the actual tracing.
-- [ImageMagick](https://imagemagick.org) handles the optional background removal and upscaling.
+- [ImageMagick](https://imagemagick.org) handles optional image preparation and background removal.
 
 ## License
 
