@@ -29,7 +29,7 @@
   <img src="assets/comparison.png" alt="Tiger source at 256 pixels, raster upscale then trace, and native trace followed by SVG scaling" width="900">
 </p>
 
-The right panel uses the [256×256 tiger source](assets/tiger-source-256.png): `vtracer` traces its original pixels, then the [512×512 SVG](assets/tiger-native-512.svg) scales those same paths by 2. The middle panel shows the earlier raster-upscale approach for comparison. The new SVG contains the same 116 paths as its 256×256 trace; only its canvas and parent transform differ.
+The left panel shows the [256×256 tiger source](assets/tiger-source-256.png) at its native size. The right panel uses that same source: `vtracer` traces its original pixels, then the [512×512 SVG](assets/tiger-native-512.svg) scales those same paths by 2. The middle panel shows the earlier raster-upscale approach for comparison. The new SVG contains the same 116 paths as its 256×256 trace; only its canvas and parent transform differ.
 
 `convert-to-svg` avoids both:
 
