@@ -2,8 +2,7 @@
 # Convert raster images (PNG, JPG, WebP, BMP, GIF, TIFF) to SVG with vtracer.
 # By default the image is traced at its native resolution and the requested canvas is applied
 # to the SVG itself (viewBox + transform) - lossless.
-# Optional --upscale first enlarges a smaller source with the Mitchell filter. NEVER use Lanczos
-# for that: its negative lobes ring on the alpha edge and vtracer then draws a ragged halo.
+# A larger canvas never resamples the raster; the finished SVG alone is scaled.
 # Optional --flat-palette cleans flat artwork before tracing, keeping gray edge fragments neutral.
 # Canvas size and background handling are NOT defaulted: they must be passed explicitly
 # (the agent asks the user first).
@@ -18,8 +17,6 @@ Usage: convert.sh <input-file-or-dir> [options]
 Canvas (REQUIRED, choose exactly one):
   --size WxH           Scale the SVG to fit inside WxH and center it on a WxH canvas (e.g. 512x512)
   --no-resize          Keep the original pixel dimensions
-  --upscale            With --size and a smaller source: enlarge the raster (Mitchell filter) before
-                       tracing. Experimental: more detail on some images, bumpier edges on others
 
 Background (REQUIRED, choose exactly one):
   --keep-background    Trace the source as is (right choice for PNGs that are already transparent)
@@ -35,7 +32,7 @@ Flat artwork cleanup (opt-in; not for photos, gradients or translucent art):
 Output:
   -o, --output DIR     Output directory (default: <input dir>/output)
   --suffix STR         Suffix appended to the output name (default: none; e.g. _512)
-  --keep-prep          Keep intermediate .prep/ files (--remove-bg and upscaling)
+  --keep-prep          Keep intermediate .prep/ files (--remove-bg and --flat-palette)
 
 vtracer tuning (defaults are proven values):
   --mode MODE          spline | polygon | none            (default: spline)
@@ -46,7 +43,7 @@ vtracer tuning (defaults are proven values):
 EOF
 }
 
-SIZE="" ; NO_RESIZE=0 ; UPSCALE=0
+SIZE="" ; NO_RESIZE=0
 BG="" ; FUZZ="5%"
 OUT="" ; SUFFIX="" ; KEEP_PREP=0
 MODE="spline" ; SIMPLIFY="1.5" ; SPECKLE="4" ; PRECISION="5"
@@ -58,7 +55,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --size) SIZE="$2"; shift 2 ;;
     --no-resize) NO_RESIZE=1; shift ;;
-    --upscale) UPSCALE=1; shift ;;
     --remove-bg) BG="remove"; shift ;;
     --keep-background) BG="keep"; shift ;;
     --fuzz) FUZZ="$2"; shift 2 ;;
@@ -100,7 +96,7 @@ if [[ -z "$BG" ]]; then
 fi
 
 command -v vtracer >/dev/null || { echo "Error: 'vtracer' not found. See SKILL.md for install steps." >&2; exit 3; }
-if [[ "$BG" == "remove" || -n "$FLAT_PALETTE" || ( -n "$SIZE" && $UPSCALE -eq 1 ) ]]; then
+if [[ "$BG" == "remove" || -n "$FLAT_PALETTE" ]]; then
   command -v magick >/dev/null || { echo "Error: ImageMagick ('magick') not found (needed for image preparation). See SKILL.md." >&2; exit 3; }
 fi
 if [[ -n "$SIZE" || -n "$FLAT_PALETTE" ]]; then
@@ -162,18 +158,6 @@ for src in "${files[@]}"; do
       magick "$src" -background "$bg_color" -alpha remove -alpha off -alpha set \
         -fuzz "$FUZZ" -fill none -draw "color 0,0 floodfill" -background none "$trace_in" \
         || { echo "FAIL $src" >&2; fail=$((fail+1)); continue; }
-    fi
-  fi
-
-  # Opt-in: upscale (never downscale) to the canvas fit with Mitchell before tracing
-  if [[ -n "$SIZE" && $UPSCALE -eq 1 ]]; then
-    read -r sw sh < <(magick identify -format '%w %h\n' "$trace_in[0]")
-    cw="${SIZE%x*}" ; ch="${SIZE#*x}"
-    if (( sw < cw && sh < ch )); then
-      up_in="$PREP/up_${name}.png"
-      magick "$trace_in" -background none -filter Mitchell -resize "${cw}x${ch}" "$up_in" \
-        || { echo "FAIL $src" >&2; fail=$((fail+1)); continue; }
-      trace_in="$up_in"
     fi
   fi
 

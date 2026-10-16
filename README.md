@@ -41,7 +41,7 @@ The right panel uses the [256×256 tiger source](assets/tiger-source-256.png): `
 
 The result is the same clean outline you get from running `vtracer` by hand on the original file — plus a canvas of any size, centered.
 
-> **Honest trade-off:** tracing the original pixels of a very small source (for example 256 px) gives a clean outline but coarser inner detail. If you want to try more detail, add `--upscale`. It enlarges the raster with a non-ringing filter first. It looked better on some of our icons and worse on others, so it is opt-in.
+> **Honest trade-off:** tracing a very small source (for example 256 px) cannot recover detail missing from its pixels. A larger SVG canvas makes the traced paths scalable; a sharper source is needed for finer detail.
 
 ## Features
 
@@ -58,7 +58,7 @@ The result is the same clean outline you get from running `vtracer` by hand on t
 - macOS (developed and tested here; the script is plain bash and may work on Linux, but that is untested)
 - [vtracer](https://github.com/visioncortex/vtracer) CLI
 - `python3` (used for `--size` and `--flat-palette`; no extra Python packages)
-- [ImageMagick](https://imagemagick.org) (used for `--remove-bg`, `--upscale` and `--flat-palette`)
+- [ImageMagick](https://imagemagick.org) (used for `--remove-bg` and `--flat-palette`)
 
 ```bash
 brew install imagemagick
@@ -128,10 +128,9 @@ scripts/convert.sh logo.png --size 1024x768 --keep-background
 | `--flat-palette LIST` | Clean flat artwork before tracing, using explicit comma-separated `#RRGGBB` colors; forces trace color precision 8 |
 | `--flat-neutral N` | Channel-spread threshold for mapping near-gray pixels to neutral palette entries (default `20`, `0` disables) |
 | `--flat-alpha N` | Opacity cutoff for flat cleanup, `1`–`255` (default `128`) |
-| `--upscale` | With `--size` and a smaller source: enlarge the raster (Mitchell filter) before tracing. Experimental |
 | `-o, --output DIR` | Output folder (default `<input dir>/output`) |
 | `--suffix STR` | Append a suffix to the file name, e.g. `_512` → `name_512.svg` |
-| `--keep-prep` | Keep intermediate files (`--remove-bg` and `--upscale`) |
+| `--keep-prep` | Keep intermediate files (`--remove-bg` and `--flat-palette`) |
 | `--mode` | `spline` (default), `polygon` or `none` |
 | `--simplify N` | Corner simplification (default `1.5`) |
 | `--filter-speckle N` | Drop speckles smaller than `N` px (default `4`) |
@@ -158,14 +157,14 @@ Use this mode for **opaque, flat-color illustrations**. Keep the normal pipeline
 
 - **Ragged or fringed outline** → the raster was upscaled with Lanczos (or similar) before tracing. Trace the original.
 - **Gray ring around the outline on an opaque (white-background) image** → raise `--fuzz` to about `25%`. The anti-aliased light-gray edge pixels fall outside the default `5%` tolerance, so they get traced as a ring.
-- **Blocky detail on a small source** → try `--upscale` and compare with the default. It helps some images and hurts others.
+- **Blocky detail on a small source** → use a sharper source or simplify the icon design; increasing the SVG canvas cannot recover absent detail.
 - **Noisy or blobby result** → raise `--filter-speckle` or `--simplify`, lower `--color-precision`.
 - **Lost detail** → lower `--filter-speckle` / `--simplify`, raise `--color-precision`.
 - **Background remains** → raise `--fuzz`. The flood-fill starts at the top-left pixel, so the background needs a uniform corner.
 
 ### Small source, large output
 
-For a small image that needs a 512×512 SVG, use `--size 512x512` without `--upscale`. The original pixels are traced first. Only the SVG canvas and one parent transform change afterward, so contours are identical to a `--no-resize` conversion with the same other options.
+For a small image that needs a 512×512 SVG, use `--size 512x512`. The original pixels are traced first. Only the SVG canvas and one parent transform change afterward, so contours are identical to a `--no-resize` conversion with the same other options. The script has no raster-upscale mode.
 
 A 262×206 image fits in 512×512 at scale 1.9542, centered with about 54.718 units above and below. It is not stretched to a square. In the tested food illustration, all 27 paths stayed identical and resizing added less than 100 bytes to an approximately 8.7 KB SVG. The test suite verifies this for normal and flat-palette conversion, including native preparation dimensions and unchanged source bytes.
 

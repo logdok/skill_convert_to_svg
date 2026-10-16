@@ -6,8 +6,7 @@ description: Convert raster images (PNG/JPG/JPEG/WebP/BMP/GIF/TIFF) to SVG on ma
 # convert-to-svg
 
 Pipeline: optional background removal → optional flat-color cleanup → **vtracer** at NATIVE resolution → requested SVG canvas (`viewBox` + one `<g transform>`). ImageMagick decodes/encodes preparation files; the flat-color helper uses only Python's standard library.
-**Never upscale the raster with Lanczos before tracing**: its negative lobes ring on the alpha edge and vtracer then draws a ragged halo around the outline. Measured on a 256px transparent tiger: tracing the original gave a clean outline, the same trace after a Lanczos upscale gave a fringe. Scaling the vector is lossless, so the output size has no effect on quality.
-`--upscale` (Mitchell filter) is an opt-in experiment: it gave more detail on one image (tiger1) but bumpier edges on another (horse2 after `--remove-bg`), so it is not the default.
+**Never upscale the raster to meet the SVG canvas size.** Trace the source at native resolution, then fit the vector into the requested canvas. Raster enlargement can create fringes (observed with Lanczos on a 256px transparent tiger) and cannot add genuine source detail. The script does not offer a raster-upscale option.
 Everything is plain bash (`scripts/convert.sh`), so it works the same for Claude Code and Codex.
 
 Source of truth: https://github.com/logdok/skill_convert_to_svg.git. Skill folder: `~/.claude/skills/convert-to-svg/` (Claude Code) or `~/.codex/skills/convert-to-svg/` (Codex).
@@ -74,7 +73,7 @@ For **opaque flat fills with strong outlines**, gray patches on heads/clothes an
   --simplify 0.8 --filter-speckle 4 -o clean_svg
 ```
 
-The six colors above are **an example**, not a universal icon palette. `--flat-neutral 20` is the default RGB channel-spread threshold (0 disables neutral protection); `--flat-alpha 128` is the default opacity cutoff (1–255). The helper is `scripts/prepare_flat.py`; no Pillow or OpenCV installation is needed. Native resolution remains the default. If `--upscale` is explicitly used, cleanup runs after the experimental Mitchell resize, so interpolation colors do not enter the trace.
+The six colors above are **an example**, not a universal icon palette. `--flat-neutral 20` is the default RGB channel-spread threshold (0 disables neutral protection); `--flat-alpha 128` is the default opacity cutoff (1–255). The helper is `scripts/prepare_flat.py`; no Pillow or OpenCV installation is needed. Cleanup keeps the source's native dimensions.
 
 Compare the rendered SVG at intended size and 2–4× with the source: outer contour, holes, eyes, fingers, thin strokes, colors, and transparency. Start with speckle 4; lower it for small meaningful details. Raise it only when the removed islands are confirmed artifacts. Do not compensate with aggressive simplification that distorts hands or faces. Keep the original file until the improved version is reviewed. Check bytes and path count as well as appearance; never embed the raster to fake fidelity.
 
@@ -82,7 +81,7 @@ Measured example (266×336, two figures, six flat colors): native cleanup with n
 
 ## 5. Small raster → large SVG canvas (e.g. 262×206 → 512×512)
 
-Use `--size 512x512` **without `--upscale`**. This is already the standard workflow: trace the original resolution, then change only the SVG root and one parent transform. Background/palette preparation may change pixel colors, but must keep the native dimensions. A larger requested canvas is not a reason to enlarge the raster.
+Use `--size 512x512`. The script traces the original resolution, then changes only the SVG root and one parent transform. Background/palette preparation may change pixel colors, but must keep the native dimensions. A larger requested canvas never enlarges the raster.
 
 ```bash
 "$S" small.png --size 512x512 --remove-bg -o output
@@ -97,8 +96,8 @@ Render the final SVG at 512×512 for inspection, but do not use that preview as 
 
 ## 6. Tuning tips
 
-- Ragged/fringed outline → the raster was upscaled with Lanczos (or similar) before tracing (see Pipeline). Trace the original instead.
-- Blocky detail on a small source → try `--upscale` and compare; it helps some images and hurts others.
+- Ragged/fringed outline → check whether the input itself was previously enlarged; trace the original if available.
+- Blocky detail on a small source → obtain a sharper source or simplify the intended icon design; a larger SVG canvas cannot restore missing detail.
 - Too noisy/blobby → raise `--filter-speckle` or `--simplify`, lower `--color-precision`.
 - Lost detail → lower `--filter-speckle`/`--simplify`, raise `--color-precision`.
 - Gray halo around the outline on an opaque (JPG-like/white-background) source → raise `--fuzz` to ~25%: the anti-aliased light-gray edge pixels are outside the default 5% tolerance, so vtracer traces them as a gray ring. Measured on a 256px horse: 5% left a ring around hooves/tail, 25% removed it and kept the inner lines; heavy `--filter-speckle`/`--color-precision` reduction only blurred detail.

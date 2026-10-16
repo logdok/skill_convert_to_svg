@@ -77,6 +77,17 @@ class FlatCleanupTests(unittest.TestCase):
         self.assertIn(b"invalid palette color", result.stderr)
         self.assertFalse(output.exists())
 
+    def test_raster_upscale_option_is_rejected(self):
+        source = self.folder / "one.png"
+        run("magick", "-size", "1x1", "xc:black", str(source))
+        output = self.folder / "output"
+        result = subprocess.run(["bash", str(SCRIPTS / "convert.sh"), str(source),
+            "--size", "512x512", "--keep-background", "--upscale", "-o", str(output)],
+            capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(b"Unknown option: --upscale", result.stderr)
+        self.assertFalse(output.exists())
+
     def test_larger_canvas_keeps_native_pixels_and_identical_vector_paths(self):
         source = self.folder / "small.png"
         run("magick", "-size", "26x21", "xc:none", "-fill", "black",
